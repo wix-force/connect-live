@@ -6,24 +6,17 @@ import {
 } from 'lucide-react';
 import { useAppSelector, useAppDispatch } from '@/store';
 import { toggleMic, toggleCamera, toggleScreenShare, toggleHandRaise } from '@/store/slices/mediaSlice';
-import { leaveMeeting, toggleRecording, createMeeting } from '@/store/slices/meetingSlice';
+import { leaveMeeting, toggleRecording, setMeetingActive, fetchMeetingById, endMeetingAsync } from '@/store/slices/meetingSlice';
 import { setSidePanel, toggleSettings } from '@/store/slices/uiSlice';
-import { setParticipants, setActiveSpeaker, pinParticipant } from '@/store/slices/participantSlice';
+import { setParticipants, setActiveSpeaker, pinParticipant, addParticipant } from '@/store/slices/participantSlice';
+import { loadChatHistory, clearChat } from '@/store/slices/chatSlice';
 import VideoTile from '@/components/meeting/VideoTile';
 import ChatPanel from '@/components/meeting/ChatPanel';
 import ParticipantsPanel from '@/components/meeting/ParticipantsPanel';
 import SettingsModal from '@/components/meeting/SettingsModal';
+import { useMeetingSocket } from '@/hooks/useSocket';
 import { AnimatePresence, motion } from 'framer-motion';
-
-// Mock participants
-const mockParticipants = [
-  { id: '1', name: 'You', isMuted: false, isCameraOff: false, isSpeaking: true, isHost: true, isHandRaised: false, networkQuality: 'good' as const, isScreenSharing: false },
-  { id: '2', name: 'Sarah Chen', isMuted: false, isCameraOff: false, isSpeaking: false, isHost: false, isHandRaised: false, networkQuality: 'good' as const, isScreenSharing: false },
-  { id: '3', name: 'Mike Johnson', isMuted: true, isCameraOff: true, isSpeaking: false, isHost: false, isHandRaised: true, networkQuality: 'fair' as const, isScreenSharing: false },
-  { id: '4', name: 'Emily Davis', isMuted: false, isCameraOff: false, isSpeaking: false, isHost: false, isHandRaised: false, networkQuality: 'good' as const, isScreenSharing: false },
-  { id: '5', name: 'Alex Wilson', isMuted: true, isCameraOff: false, isSpeaking: false, isHost: false, isHandRaised: false, networkQuality: 'poor' as const, isScreenSharing: false },
-  { id: '6', name: 'Lisa Park', isMuted: false, isCameraOff: true, isSpeaking: false, isHost: false, isHandRaised: false, networkQuality: 'good' as const, isScreenSharing: false },
-];
+import { toast } from 'sonner';
 
 function useTimer(startTime: number | null) {
   const [elapsed, setElapsed] = useState(0);
@@ -42,38 +35,114 @@ export default function MeetingRoom() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { isMicOn, isCameraOn, isScreenSharing, isHandRaised } = useAppSelector(s => s.media);
-  const { isRecording, startTime, connectionStatus, title, meetingId } = useAppSelector(s => s.meeting);
+  const { isRecording, startTime, connectionStatus, title, meetingId, isHost, currentMeeting } = useAppSelector(s => s.meeting);
   const { sidePanel, isSettingsOpen } = useAppSelector(s => s.ui);
   const { participants, activeSpeakerId, pinnedParticipantId } = useAppSelector(s => s.participants);
   const unreadCount = useAppSelector(s => s.chat.unreadCount);
+  const user = useAppSelector(s => s.auth.user);
   const timer = useTimer(startTime);
+
+  // Connect to Socket.IO meeting room
+  const {
+    toggleMicSocket,
+    toggleCameraSocket,
+    raiseHandSocket,
+    startScreenShareSocket,
+    stopScreenShareSocket,
+    disconnect: disconnectSocket,
+  } = useMeetingSocket(id || null);
 
   // Initialize meeting
   useEffect(() => {
-    if (!meetingId) {
-      dispatch(createMeeting({ id: id || 'demo', title: 'Team Meeting' }));
+    if (!id) return;
+
+    // Fetch meeting data from API
+    dispatch(fetchMeetingById(id));
+    dispatch(loadChatHistory(id));
+
+    // If not already set as active (e.g., direct navigation)
+    if (!meetingId || meetingId !== id) {
+      dispatch(setMeetingActive({
+        id,
+        title: currentMeeting?.title || 'Meeting',
+        isHost: currentMeeting?.hostId?.toString() === user?.id || false,
+      }));
     }
-    dispatch(setParticipants(mockParticipants));
-    dispatch(setActiveSpeaker('1'));
 
-    // Simulate random speaking
-    const interval = setInterval(() => {
-      const randomId = mockParticipants[Math.floor(Math.random() * mockParticipants.length)].id;
-      dispatch(setActiveSpeaker(randomId));
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [dispatch, id, meetingId]);
+    // Add self as participant
+    if (user) {
+      dispatch(addParticipant({
+        id: user.id,
+        name: user.name,
+        avatar: user.avatar,
+        isMuted: !isMicOn,
+        isCameraOff: !isCameraOn,
+        isSpeaking: false,
+        isHost: isHost,
+        isHandRaised: false,
+        networkQuality: 'good',
+        isScreenSharing: false,
+      }));
+    }
 
-  const handleLeave = useCallback(() => {
+    return () => {
+      dispatch(clearChat());
+    };
+  }, [id, dispatch]);
+
+  // Update meeting title when data loads
+  useEffect(() => {
+    if (currentMeeting && meetingId === currentMeeting.meetingId) {
+      dispatch(setMeetingActive({
+        id: currentMeeting.meetingId,
+        title: currentMeeting.title,
+        isHost: typeof currentMeeting.hostId === 'object'
+          ? (currentMeeting.hostId as any)._id === user?.id
+          : currentMeeting.hostId === user?.id,
+      }));
+    }
+  }, [currentMeeting]);
+
+  const handleLeave = useCallback(async () => {
+    disconnectSocket();
     dispatch(leaveMeeting());
     navigate('/dashboard');
-  }, [dispatch, navigate]);
+  }, [dispatch, navigate, disconnectSocket]);
+
+  const handleEndMeeting = useCallback(async () => {
+    if (!id) return;
+    await dispatch(endMeetingAsync(id));
+    disconnectSocket();
+    dispatch(leaveMeeting());
+    navigate('/dashboard');
+    toast.info('Meeting ended');
+  }, [id, dispatch, navigate, disconnectSocket]);
+
+  const handleToggleMic = useCallback(() => {
+    dispatch(toggleMic());
+    toggleMicSocket(!isMicOn);
+  }, [dispatch, isMicOn, toggleMicSocket]);
+
+  const handleToggleCamera = useCallback(() => {
+    dispatch(toggleCamera());
+    toggleCameraSocket(!isCameraOn);
+  }, [dispatch, isCameraOn, toggleCameraSocket]);
+
+  const handleToggleScreenShare = useCallback(() => {
+    dispatch(toggleScreenShare());
+    if (!isScreenSharing) startScreenShareSocket();
+    else stopScreenShareSocket();
+  }, [dispatch, isScreenSharing, startScreenShareSocket, stopScreenShareSocket]);
+
+  const handleToggleHand = useCallback(() => {
+    dispatch(toggleHandRaise());
+    raiseHandSocket(!isHandRaised);
+  }, [dispatch, isHandRaised, raiseHandSocket]);
 
   const togglePanel = useCallback((panel: 'chat' | 'participants') => {
     dispatch(setSidePanel(sidePanel === panel ? 'none' : panel));
   }, [dispatch, sidePanel]);
 
-  // Grid layout calculation
   const gridClass = useMemo(() => {
     const count = participants.length;
     if (count <= 1) return 'grid-cols-1';
@@ -106,12 +175,13 @@ export default function MeetingRoom() {
             </div>
           )}
           <div className="flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-meet-success" />
+            <Shield className={`w-3.5 h-3.5 ${connectionStatus === 'connected' ? 'text-meet-success' : connectionStatus === 'reconnecting' ? 'text-meet-warning' : 'text-meet-danger'}`} />
             <span className="text-xs text-meet-control-fg/60 hidden sm:inline capitalize">{connectionStatus}</span>
           </div>
           <button
             onClick={() => {
               navigator.clipboard.writeText(meetingId || id || '');
+              toast.success('Meeting code copied!');
             }}
             className="hidden sm:flex items-center gap-1.5 text-xs text-meet-control-fg/60 hover:text-meet-control-fg transition-colors px-2 py-1 rounded hover:bg-meet-control-fg/10"
             aria-label="Copy meeting code"
@@ -124,7 +194,6 @@ export default function MeetingRoom() {
 
       {/* Main content area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Video Grid */}
         <div className={`flex-1 p-3 transition-all duration-300 ${isPanelOpen ? 'lg:mr-0' : ''}`}>
           <div className={`grid ${gridClass} gap-3 h-full auto-rows-fr`}>
             {participants.map(p => (
@@ -140,7 +209,6 @@ export default function MeetingRoom() {
           </div>
         </div>
 
-        {/* Side Panel */}
         <AnimatePresence>
           {isPanelOpen && (
             <motion.div
@@ -163,55 +231,22 @@ export default function MeetingRoom() {
       {/* Bottom Control Bar */}
       <div className="h-20 flex items-center justify-center px-4 bg-meet-control-bg/50 backdrop-blur-sm flex-shrink-0">
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Mic */}
-          <button
-            onClick={() => dispatch(toggleMic())}
-            className={isMicOn ? 'meet-control-btn' : 'meet-control-btn-danger'}
-            aria-label={isMicOn ? 'Mute microphone (Ctrl+D)' : 'Unmute microphone (Ctrl+D)'}
-            title={isMicOn ? 'Mute (Ctrl+D)' : 'Unmute (Ctrl+D)'}
-          >
+          <button onClick={handleToggleMic} className={isMicOn ? 'meet-control-btn' : 'meet-control-btn-danger'} aria-label={isMicOn ? 'Mute' : 'Unmute'} title={isMicOn ? 'Mute (Ctrl+D)' : 'Unmute (Ctrl+D)'}>
             {isMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
           </button>
-
-          {/* Camera */}
-          <button
-            onClick={() => dispatch(toggleCamera())}
-            className={isCameraOn ? 'meet-control-btn' : 'meet-control-btn-danger'}
-            aria-label={isCameraOn ? 'Turn off camera (Ctrl+E)' : 'Turn on camera (Ctrl+E)'}
-            title={isCameraOn ? 'Camera off (Ctrl+E)' : 'Camera on (Ctrl+E)'}
-          >
+          <button onClick={handleToggleCamera} className={isCameraOn ? 'meet-control-btn' : 'meet-control-btn-danger'} aria-label={isCameraOn ? 'Camera off' : 'Camera on'} title={isCameraOn ? 'Camera off (Ctrl+E)' : 'Camera on (Ctrl+E)'}>
             {isCameraOn ? <VideoIcon className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
           </button>
-
-          {/* Screen Share */}
-          <button
-            onClick={() => dispatch(toggleScreenShare())}
-            className={isScreenSharing ? 'meet-control-btn-active' : 'meet-control-btn'}
-            aria-label="Share screen"
-            title="Present now"
-          >
+          <button onClick={handleToggleScreenShare} className={isScreenSharing ? 'meet-control-btn-active' : 'meet-control-btn'} aria-label="Share screen" title="Present now">
             <Monitor className="w-5 h-5" />
           </button>
-
-          {/* Raise Hand */}
-          <button
-            onClick={() => dispatch(toggleHandRaise())}
-            className={isHandRaised ? 'meet-control-btn-active' : 'meet-control-btn'}
-            aria-label="Raise hand"
-            title="Raise hand"
-          >
+          <button onClick={handleToggleHand} className={isHandRaised ? 'meet-control-btn-active' : 'meet-control-btn'} aria-label="Raise hand" title="Raise hand">
             <Hand className="w-5 h-5" />
           </button>
 
           <div className="w-px h-8 bg-meet-control-fg/20 mx-1 hidden sm:block" />
 
-          {/* Chat */}
-          <button
-            onClick={() => togglePanel('chat')}
-            className={`meet-control-btn relative ${sidePanel === 'chat' ? '!bg-primary' : ''}`}
-            aria-label="Toggle chat"
-            title="Chat"
-          >
+          <button onClick={() => togglePanel('chat')} className={`meet-control-btn relative ${sidePanel === 'chat' ? '!bg-primary' : ''}`} aria-label="Toggle chat" title="Chat">
             <MessageSquare className="w-5 h-5" />
             {unreadCount > 0 && sidePanel !== 'chat' && (
               <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-meet-danger text-[10px] font-bold flex items-center justify-center text-primary-foreground">
@@ -219,60 +254,30 @@ export default function MeetingRoom() {
               </span>
             )}
           </button>
-
-          {/* Participants */}
-          <button
-            onClick={() => togglePanel('participants')}
-            className={`meet-control-btn relative ${sidePanel === 'participants' ? '!bg-primary' : ''}`}
-            aria-label="Toggle participants"
-            title="People"
-          >
+          <button onClick={() => togglePanel('participants')} className={`meet-control-btn relative ${sidePanel === 'participants' ? '!bg-primary' : ''}`} aria-label="Toggle participants" title="People">
             <Users className="w-5 h-5" />
             <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-meet-control-bg border border-meet-control-fg/20 text-[10px] font-bold flex items-center justify-center text-meet-control-fg">
               {participants.length}
             </span>
           </button>
-
-          {/* Record */}
-          <button
-            onClick={() => dispatch(toggleRecording())}
-            className={`meet-control-btn hidden sm:flex ${isRecording ? '!bg-meet-danger' : ''}`}
-            aria-label={isRecording ? 'Stop recording' : 'Start recording'}
-            title="Record"
-          >
+          <button onClick={() => dispatch(toggleRecording())} className={`meet-control-btn hidden sm:flex ${isRecording ? '!bg-meet-danger' : ''}`} aria-label={isRecording ? 'Stop recording' : 'Start recording'} title="Record">
             <Disc className="w-5 h-5" />
           </button>
-
-          {/* Settings */}
-          <button
-            onClick={() => dispatch(toggleSettings())}
-            className="meet-control-btn hidden sm:flex"
-            aria-label="Settings"
-            title="Settings"
-          >
+          <button onClick={() => dispatch(toggleSettings())} className="meet-control-btn hidden sm:flex" aria-label="Settings" title="Settings">
             <Settings className="w-5 h-5" />
           </button>
-
-          {/* More (mobile) */}
           <button className="meet-control-btn sm:hidden" aria-label="More options">
             <MoreVertical className="w-5 h-5" />
           </button>
 
           <div className="w-px h-8 bg-meet-control-fg/20 mx-1 hidden sm:block" />
 
-          {/* Leave */}
-          <button
-            onClick={handleLeave}
-            className="meet-control-btn-danger px-6"
-            aria-label="Leave meeting"
-            title="Leave call"
-          >
+          <button onClick={handleLeave} className="meet-control-btn-danger px-6" aria-label="Leave meeting" title="Leave call">
             <PhoneOff className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      {/* Settings Modal */}
       {isSettingsOpen && <SettingsModal onClose={() => dispatch(toggleSettings())} />}
     </div>
   );

@@ -5,14 +5,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAppDispatch, useAppSelector } from '@/store';
+import { registerUser, clearError } from '@/store/slices/authSlice';
+import { toast } from 'sonner';
 
 export default function RegisterPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' });
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const { isLoading, error } = useAppSelector(s => s.auth);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -25,18 +29,28 @@ export default function RegisterPage() {
     if (!form.password) e.password = 'Password is required';
     else if (form.password.length < 8) e.password = 'Min 8 characters';
     if (form.password !== form.confirm) e.confirm = 'Passwords do not match';
-    setErrors(e);
+    setValidationErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
-    setIsLoading(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setIsLoading(false);
-    setSuccess(true);
-    setTimeout(() => navigate('/login'), 2000);
+    dispatch(clearError());
+
+    const result = await dispatch(registerUser({
+      name: form.name,
+      email: form.email,
+      password: form.password,
+    }));
+
+    if (registerUser.fulfilled.match(result)) {
+      setSuccess(true);
+      toast.success('Account created successfully!');
+      setTimeout(() => navigate('/dashboard'), 2000);
+    } else {
+      toast.error(result.payload as string || 'Registration failed');
+    }
   };
 
   return (
@@ -64,12 +78,18 @@ export default function RegisterPage() {
               >
                 <CheckCircle2 className="w-16 h-16 text-meet-success mx-auto mb-4" />
                 <h2 className="text-2xl font-bold text-foreground mb-2">Account Created!</h2>
-                <p className="text-muted-foreground">Redirecting to sign in...</p>
+                <p className="text-muted-foreground">Redirecting to dashboard...</p>
               </motion.div>
             ) : (
               <motion.div key="form">
                 <h1 className="text-2xl font-bold text-foreground mb-1">Create account</h1>
                 <p className="text-muted-foreground mb-8">Join MeetFlow and start connecting</p>
+
+                {error && (
+                  <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+                    {error}
+                  </div>
+                )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {[
@@ -84,10 +104,10 @@ export default function RegisterPage() {
                         placeholder={f.placeholder}
                         value={(form as any)[f.key]}
                         onChange={set(f.key)}
-                        className={errors[f.key] ? 'border-destructive' : ''}
-                        aria-invalid={!!errors[f.key]}
+                        className={validationErrors[f.key] ? 'border-destructive' : ''}
+                        aria-invalid={!!validationErrors[f.key]}
                       />
-                      {errors[f.key] && <p className="text-sm text-destructive">{errors[f.key]}</p>}
+                      {validationErrors[f.key] && <p className="text-sm text-destructive">{validationErrors[f.key]}</p>}
                     </div>
                   ))}
 
@@ -101,8 +121,8 @@ export default function RegisterPage() {
                           placeholder="••••••••"
                           value={(form as any)[k]}
                           onChange={set(k)}
-                          className={errors[k] ? 'border-destructive pr-10' : 'pr-10'}
-                          aria-invalid={!!errors[k]}
+                          className={validationErrors[k] ? 'border-destructive pr-10' : 'pr-10'}
+                          aria-invalid={!!validationErrors[k]}
                         />
                         {k === 'password' && (
                           <button
@@ -115,7 +135,7 @@ export default function RegisterPage() {
                           </button>
                         )}
                       </div>
-                      {errors[k] && <p className="text-sm text-destructive">{errors[k]}</p>}
+                      {validationErrors[k] && <p className="text-sm text-destructive">{validationErrors[k]}</p>}
                     </div>
                   ))}
 

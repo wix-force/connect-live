@@ -1,25 +1,32 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Video, Mic, MicOff, VideoOff, Monitor, Settings, ChevronDown } from 'lucide-react';
+import { Video, Mic, MicOff, VideoOff, Monitor, Settings, ChevronDown, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { toggleMic, toggleCamera } from '@/store/slices/mediaSlice';
-import { joinMeeting } from '@/store/slices/meetingSlice';
+import { joinMeetingAsync, fetchMeetingById } from '@/store/slices/meetingSlice';
 import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 
 export default function JoinMeetingPage() {
   const { code } = useParams();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { isMicOn, isCameraOn } = useAppSelector(s => s.media);
+  const user = useAppSelector(s => s.auth.user);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [meetingCode, setMeetingCode] = useState(code || '');
+  const [password, setPassword] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
+  const [isNewMeeting] = useState(!code && window.location.pathname === '/meeting/new');
 
   useEffect(() => {
+    let currentStream: MediaStream | null = null;
     if (isCameraOn) {
       navigator.mediaDevices.getUserMedia({ video: true, audio: false })
         .then(s => {
+          currentStream = s;
           setStream(s);
           if (videoRef.current) videoRef.current.srcObject = s;
         })
@@ -28,13 +35,34 @@ export default function JoinMeetingPage() {
       stream?.getTracks().forEach(t => t.stop());
       setStream(null);
     }
-    return () => { stream?.getTracks().forEach(t => t.stop()); };
+    return () => { currentStream?.getTracks().forEach(t => t.stop()); };
   }, [isCameraOn]);
 
-  const handleJoin = () => {
-    const id = meetingCode || 'instant-' + Date.now();
-    dispatch(joinMeeting(id));
-    navigate(`/meeting/${id}`);
+  const handleJoin = async () => {
+    if (!meetingCode && !isNewMeeting) {
+      toast.error('Please enter a meeting code');
+      return;
+    }
+
+    setIsJoining(true);
+    try {
+      if (isNewMeeting) {
+        // Creating a new meeting — handled by dashboard, redirect there
+        navigate('/dashboard');
+        return;
+      }
+
+      const result = await dispatch(joinMeetingAsync({ meetingId: meetingCode, password: password || undefined }));
+      if (joinMeetingAsync.fulfilled.match(result)) {
+        navigate(`/meeting/${meetingCode}`);
+      } else {
+        toast.error(result.payload as string || 'Failed to join meeting');
+      }
+    } catch {
+      toast.error('Failed to join meeting');
+    } finally {
+      setIsJoining(false);
+    }
   };
 
   return (
@@ -58,12 +86,11 @@ export default function JoinMeetingPage() {
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-meet-video-bg">
                   <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center">
-                    <span className="text-3xl font-bold text-primary">D</span>
+                    <span className="text-3xl font-bold text-primary">{user?.name?.[0] || 'D'}</span>
                   </div>
                 </div>
               )}
 
-              {/* Controls overlay */}
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3">
                 <button
                   onClick={() => dispatch(toggleMic())}
@@ -99,7 +126,17 @@ export default function JoinMeetingPage() {
                   />
                 </div>
 
-                {/* Device selectors */}
+                <div>
+                  <label className="text-sm text-muted-foreground mb-1 block">Password (optional)</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Meeting password"
+                    className="w-full h-10 rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+
                 {['Microphone', 'Camera'].map(d => (
                   <div key={d}>
                     <label className="text-sm text-muted-foreground mb-1 block">{d}</label>
@@ -114,8 +151,9 @@ export default function JoinMeetingPage() {
                 ))}
               </div>
 
-              <Button onClick={handleJoin} className="w-full h-11 rounded-lg mt-2" size="lg">
-                Join Now
+              <Button onClick={handleJoin} className="w-full h-11 rounded-lg mt-2" size="lg" disabled={isJoining}>
+                {isJoining ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                {isJoining ? 'Joining...' : 'Join Now'}
               </Button>
             </div>
 
