@@ -1,16 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Smile } from 'lucide-react';
+import { Send, Smile, Loader2 } from 'lucide-react';
 import { useAppSelector, useAppDispatch } from '@/store';
 import { addMessage, clearUnread } from '@/store/slices/chatSlice';
 import type { ChatMessage } from '@/store/slices/chatSlice';
+import { useMeetingSocket } from '@/hooks/useSocket';
 
 export default function ChatPanel() {
   const [input, setInput] = useState('');
   const messages = useAppSelector(s => s.chat.messages);
   const typingUsers = useAppSelector(s => s.chat.isTyping);
+  const isLoadingHistory = useAppSelector(s => s.chat.isLoadingHistory);
   const user = useAppSelector(s => s.auth.user);
+  const meetingId = useAppSelector(s => s.meeting.meetingId);
   const dispatch = useAppDispatch();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const { sendChatMessage, sendTyping } = useMeetingSocket(meetingId);
 
   useEffect(() => {
     dispatch(clearUnread());
@@ -19,8 +24,10 @@ export default function ChatPanel() {
 
   const send = () => {
     if (!input.trim()) return;
+
+    // Add to local state immediately (optimistic)
     const msg: ChatMessage = {
-      id: Date.now().toString(),
+      id: 'local-' + Date.now(),
       senderId: user?.id || '1',
       senderName: user?.name || 'You',
       content: input.trim(),
@@ -28,7 +35,15 @@ export default function ChatPanel() {
       type: 'text',
     };
     dispatch(addMessage(msg));
+
+    // Send via socket
+    sendChatMessage(input.trim());
     setInput('');
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInput(e.target.value);
+    sendTyping();
   };
 
   const formatTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -40,7 +55,12 @@ export default function ChatPanel() {
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 && (
+        {isLoadingHistory && (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {!isLoadingHistory && messages.length === 0 && (
           <p className="text-center text-sm text-muted-foreground py-8">
             Messages can only be seen by people in the call
           </p>
@@ -80,7 +100,7 @@ export default function ChatPanel() {
           </button>
           <input
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={e => e.key === 'Enter' && send()}
             placeholder="Send a message..."
             className="flex-1 h-9 rounded-full bg-muted px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"

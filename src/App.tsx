@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { store } from '@/store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RequireAuth, RedirectIfAuth } from '@/components/auth/RequireAuth';
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -38,12 +39,12 @@ const App = () => (
           <Suspense fallback={<LoadingFallback />}>
             <Routes>
               <Route path="/" element={<LandingPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/join/:code?" element={<JoinMeetingPage />} />
-              <Route path="/meeting/new" element={<JoinMeetingPage />} />
-              <Route path="/meeting/:id" element={<MeetingRoom />} />
+              <Route path="/login" element={<RedirectIfAuth><LoginPage /></RedirectIfAuth>} />
+              <Route path="/register" element={<RedirectIfAuth><RegisterPage /></RedirectIfAuth>} />
+              <Route path="/dashboard" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+              <Route path="/join/:code?" element={<RequireAuth><JoinMeetingPage /></RequireAuth>} />
+              <Route path="/meeting/new" element={<RequireAuth><JoinMeetingPage /></RequireAuth>} />
+              <Route path="/meeting/:id" element={<RequireAuth><MeetingRoom /></RequireAuth>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

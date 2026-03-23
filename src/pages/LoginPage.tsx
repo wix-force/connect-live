@@ -1,43 +1,50 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Video, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useAppDispatch } from '@/store';
-import { loginSuccess } from '@/store/slices/authSlice';
+import { useAppDispatch, useAppSelector } from '@/store';
+import { loginUser, clearError } from '@/store/slices/authSlice';
 import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [validationErrors, setValidationErrors] = useState<{ email?: string; password?: string }>({});
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { isLoading, error } = useAppSelector(s => s.auth);
+
+  const from = (location.state as any)?.from?.pathname || '/dashboard';
 
   const validate = () => {
-    const e: typeof errors = {};
+    const e: typeof validationErrors = {};
     if (!email) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Invalid email';
     if (!password) e.password = 'Password is required';
     else if (password.length < 6) e.password = 'Min 6 characters';
-    setErrors(e);
+    setValidationErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
-    setIsLoading(true);
-    // Simulate login
-    await new Promise(r => setTimeout(r, 1000));
-    dispatch(loginSuccess({ id: '1', name: 'Demo User', email }));
-    setIsLoading(false);
-    navigate('/dashboard');
+    dispatch(clearError());
+
+    const result = await dispatch(loginUser({ email, password }));
+    if (loginUser.fulfilled.match(result)) {
+      toast.success('Welcome back!');
+      navigate(from, { replace: true });
+    } else {
+      toast.error(result.payload as string || 'Login failed');
+    }
   };
 
   return (
@@ -70,6 +77,12 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-foreground mb-1">Sign in</h1>
           <p className="text-muted-foreground mb-8">Enter your credentials to continue</p>
 
+          {error && (
+            <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+              {error}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -79,10 +92,10 @@ export default function LoginPage() {
                 placeholder="you@example.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className={errors.email ? 'border-destructive' : ''}
-                aria-invalid={!!errors.email}
+                className={validationErrors.email ? 'border-destructive' : ''}
+                aria-invalid={!!validationErrors.email}
               />
-              {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
+              {validationErrors.email && <p className="text-sm text-destructive">{validationErrors.email}</p>}
             </div>
 
             <div className="space-y-2">
@@ -94,8 +107,8 @@ export default function LoginPage() {
                   placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className={errors.password ? 'border-destructive pr-10' : 'pr-10'}
-                  aria-invalid={!!errors.password}
+                  className={validationErrors.password ? 'border-destructive pr-10' : 'pr-10'}
+                  aria-invalid={!!validationErrors.password}
                 />
                 <button
                   type="button"
@@ -106,7 +119,7 @@ export default function LoginPage() {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
+              {validationErrors.password && <p className="text-sm text-destructive">{validationErrors.password}</p>}
             </div>
 
             <div className="flex items-center justify-between">
