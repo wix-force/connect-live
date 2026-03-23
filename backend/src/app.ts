@@ -12,6 +12,7 @@ import { meetingRoutes } from './modules/meetings/meeting.route';
 import { messageRoutes } from './modules/messages/message.route';
 import { adminRoutes } from './modules/admin/admin.route';
 import { recordingRoutes } from './modules/recordings/recording.route';
+import { dashboardRoutes } from './modules/dashboard/dashboard.route';
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/recordings', recordingRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // 404
 app.use((_req, res) => {

@@ -6,6 +6,8 @@ import participantReducer from './slices/participantSlice';
 import chatReducer from './slices/chatSlice';
 import uiReducer from './slices/uiSlice';
 import mediaReducer from './slices/mediaSlice';
+import dashboardReducer from './slices/dashboardSlice';
+import adminReducer from './slices/adminSlice';
 
 export const store = configureStore({
   reducer: {
@@ -15,6 +17,8 @@ export const store = configureStore({
     chat: chatReducer,
     ui: uiReducer,
     media: mediaReducer,
+    dashboard: dashboardReducer,
+    admin: adminReducer,
   },
 });
 

@@ -7,11 +7,13 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { store } from '@/store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RequireAuth, RedirectIfAuth } from '@/components/auth/RequireAuth';
+import { RoleGuard } from '@/components/auth/RoleGuard';
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
-const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const UserDashboard = lazy(() => import('./pages/UserDashboard'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const JoinMeetingPage = lazy(() => import('./pages/JoinMeetingPage'));
 const MeetingRoom = lazy(() => import('./pages/MeetingRoom'));
 const NotFound = lazy(() => import('./pages/NotFound'));
@@ -41,7 +43,8 @@ const App = () => (
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<RedirectIfAuth><LoginPage /></RedirectIfAuth>} />
               <Route path="/register" element={<RedirectIfAuth><RegisterPage /></RedirectIfAuth>} />
-              <Route path="/dashboard" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+              <Route path="/dashboard/*" element={<RequireAuth><UserDashboard /></RequireAuth>} />
+              <Route path="/admin/*" element={<RequireAuth><RoleGuard role="admin"><AdminDashboard /></RoleGuard></RequireAuth>} />
               <Route path="/join/:code?" element={<RequireAuth><JoinMeetingPage /></RequireAuth>} />
               <Route path="/meeting/new" element={<RequireAuth><JoinMeetingPage /></RequireAuth>} />
               <Route path="/meeting/:id" element={<RequireAuth><MeetingRoom /></RequireAuth>} />
