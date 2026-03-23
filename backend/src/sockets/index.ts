@@ -8,7 +8,7 @@ import { handleSignalingEvents } from './signalingHandler';
 import { handleMediaEvents } from './mediaHandler';
 import { participantService } from '../modules/participants/participant.service';
 
-// In-memory store for connected users (Redis-ready structure)
+// In-memory store for connected users
 export const connectedUsers = new Map<string, {
   userId: string;
   socketId: string;
