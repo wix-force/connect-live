@@ -79,12 +79,27 @@ export function useSocket() {
   return { connect, disconnect, emit, socket: globalSocket };
 }
 
-// Meeting-specific socket events
-export function useMeetingSocket(meetingId: string | null) {
+// ─── Meeting Socket with WebRTC signaling callbacks ───
+export interface WebRTCCallbacks {
+  onParticipantJoined?: (data: { userId: string; socketId: string; name: string; role: string }) => void;
+  onParticipantLeft?: (data: { userId: string; socketId: string; name: string }) => void;
+  onMeetingJoined?: (data: { meetingId: string; participants: any[] }) => void;
+  onReceiveOffer?: (data: { from: string; fromUserId: string; offer: any; meetingId: string }) => void;
+  onReceiveAnswer?: (data: { from: string; fromUserId: string; answer: any; meetingId: string }) => void;
+  onReceiveIce?: (data: { from: string; fromUserId: string; candidate: any; meetingId: string }) => void;
+  onForceMute?: () => void;
+  onForceRemove?: () => void;
+  onScreenShareStarted?: (data: { userId: string; socketId: string }) => void;
+  onScreenShareStopped?: (data: { userId: string; socketId: string }) => void;
+}
+
+export function useMeetingSocket(meetingId: string | null, webrtcCallbacks?: WebRTCCallbacks) {
   const dispatch = useAppDispatch();
   const { connect, emit, disconnect } = useSocket();
   const user = useAppSelector(s => s.auth.user);
   const isHost = useAppSelector(s => s.meeting.isHost);
+  const callbacksRef = useRef(webrtcCallbacks);
+  callbacksRef.current = webrtcCallbacks;
 
   useEffect(() => {
     if (!meetingId || !user) return;
@@ -92,7 +107,6 @@ export function useMeetingSocket(meetingId: string | null) {
     const socket = connect();
     if (!socket) return;
 
-    // Wait for connection then join room
     const joinRoom = () => {
       socket.emit('join-meeting', {
         meetingId,
@@ -100,16 +114,14 @@ export function useMeetingSocket(meetingId: string | null) {
       });
     };
 
-    if (socket.connected) {
-      joinRoom();
-    } else {
-      socket.once('connect', joinRoom);
-    }
+    if (socket.connected) joinRoom();
+    else socket.once('connect', joinRoom);
 
     // Meeting events
     socket.on('meeting-joined', (data: any) => {
       console.log('[Socket] Joined meeting with participants:', data.participants?.length);
       dispatch(setConnectionStatus('connected'));
+      callbacksRef.current?.onMeetingJoined?.(data);
     });
 
     socket.on('participant-joined', (data: any) => {
@@ -125,11 +137,13 @@ export function useMeetingSocket(meetingId: string | null) {
         isScreenSharing: false,
       }));
       toast.info(`${data.name} joined the meeting`);
+      callbacksRef.current?.onParticipantJoined?.(data);
     });
 
     socket.on('participant-left', (data: any) => {
       dispatch(removeParticipant(data.userId));
       toast.info(`${data.name} left the meeting`);
+      callbacksRef.current?.onParticipantLeft?.(data);
     });
 
     socket.on('meeting-updated', (data: any) => {
@@ -145,9 +159,11 @@ export function useMeetingSocket(meetingId: string | null) {
           break;
         case 'screen-share-start':
           dispatch(updateParticipant({ id: data.userId, changes: { isScreenSharing: true } }));
+          callbacksRef.current?.onScreenShareStarted?.(data);
           break;
         case 'screen-share-stop':
           dispatch(updateParticipant({ id: data.userId, changes: { isScreenSharing: false } }));
+          callbacksRef.current?.onScreenShareStopped?.(data);
           break;
       }
     });
@@ -178,26 +194,27 @@ export function useMeetingSocket(meetingId: string | null) {
     // WebRTC signaling
     socket.on('receive-offer', (data: any) => {
       console.log('[WebRTC] Received offer from:', data.fromUserId);
-      // WebRTC integration point: handle incoming offer
+      callbacksRef.current?.onReceiveOffer?.(data);
     });
 
     socket.on('receive-answer', (data: any) => {
       console.log('[WebRTC] Received answer from:', data.fromUserId);
-      // WebRTC integration point: handle incoming answer
+      callbacksRef.current?.onReceiveAnswer?.(data);
     });
 
     socket.on('receive-ice', (data: any) => {
-      console.log('[WebRTC] Received ICE candidate from:', data.fromUserId);
-      // WebRTC integration point: handle ICE candidate
+      callbacksRef.current?.onReceiveIce?.(data);
     });
 
     // Host controls
-    socket.on('force-mute', (data: any) => {
-      toast.warning(`You were muted by ${data.by}`);
+    socket.on('force-mute', () => {
+      toast.warning('You were muted by the host');
+      callbacksRef.current?.onForceMute?.();
     });
 
-    socket.on('force-remove', (data: any) => {
-      toast.error(`You were removed from the meeting by ${data.by}`);
+    socket.on('force-remove', () => {
+      toast.error('You were removed from the meeting');
+      callbacksRef.current?.onForceRemove?.();
     });
 
     return () => {
@@ -266,6 +283,17 @@ export function useMeetingSocket(meetingId: string | null) {
     emit('ice-candidate', { to, candidate, meetingId });
   }, [meetingId, emit]);
 
+  // Host controls
+  const muteParticipant = useCallback((targetSocketId: string) => {
+    if (!meetingId) return;
+    emit('host-mute-user', { meetingId, targetSocketId });
+  }, [meetingId, emit]);
+
+  const removeParticipantSocket = useCallback((targetSocketId: string) => {
+    if (!meetingId) return;
+    emit('host-remove-user', { meetingId, targetSocketId });
+  }, [meetingId, emit]);
+
   return {
     sendChatMessage,
     toggleMicSocket,
@@ -277,6 +305,8 @@ export function useMeetingSocket(meetingId: string | null) {
     sendOffer,
     sendAnswer,
     sendIceCandidate,
+    muteParticipant,
+    removeParticipantSocket,
     disconnect,
   };
 }
@@ -285,6 +315,8 @@ export function useMeetingSocket(meetingId: string | null) {
 export function useMediaDevices() {
   const getDevices = useCallback(async () => {
     try {
+      // Request permission first to get labels
+      await navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});
       const devices = await navigator.mediaDevices.enumerateDevices();
       return devices.map(d => ({ id: d.deviceId, label: d.label || `${d.kind} ${d.deviceId.slice(0, 5)}`, kind: d.kind }));
     } catch {
