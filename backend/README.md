@@ -15,7 +15,7 @@ npm run dev
 
 - Node.js 18+
 - MongoDB 6+
-- Redis (optional, for scaling)
+
 
 ## API Endpoints
 

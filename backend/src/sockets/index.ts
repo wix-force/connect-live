@@ -37,15 +37,6 @@ export const initSocketServer = (server: http.Server) => {
     transports: ['websocket', 'polling'],
   });
 
-  // Redis adapter ready structure
-  // When scaling: 
-  // import { createAdapter } from '@socket.io/redis-adapter';
-  // import { createClient } from 'redis';
-  // const pubClient = createClient({ url: config.redis.url });
-  // const subClient = pubClient.duplicate();
-  // await pubClient.connect();
-  // await subClient.connect();
-  // io.adapter(createAdapter(pubClient, subClient));
 
   // Authentication middleware
   io.use((socket, next) => {
