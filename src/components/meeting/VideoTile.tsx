@@ -1,13 +1,15 @@
-import { memo } from 'react';
-import { Mic, MicOff, Wifi, WifiOff, Hand, Pin } from 'lucide-react';
+import { memo, useRef, useEffect } from 'react';
+import { Mic, MicOff, Wifi, WifiOff, Hand, Pin, Monitor } from 'lucide-react';
 import type { Participant } from '@/store/slices/participantSlice';
 
 interface VideoTileProps {
   participant: Participant;
+  stream?: MediaStream | null;
   isActive?: boolean;
   isPinned?: boolean;
   onPin?: () => void;
   size?: 'sm' | 'md' | 'lg';
+  isMirrored?: boolean;
 }
 
 const SpeakingIndicator = () => (
@@ -27,8 +29,19 @@ const NetworkBadge = ({ quality }: { quality: string }) => {
   return quality === 'poor' ? <WifiOff className={`w-3.5 h-3.5 ${color}`} /> : <Wifi className={`w-3.5 h-3.5 ${color}`} />;
 };
 
-const VideoTile = memo(function VideoTile({ participant, isActive, isPinned, onPin, size = 'md' }: VideoTileProps) {
+const VideoTile = memo(function VideoTile({ participant, stream, isActive, isPinned, onPin, size = 'md', isMirrored = false }: VideoTileProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
   const avatarSize = size === 'lg' ? 'w-20 h-20 text-2xl' : size === 'sm' ? 'w-10 h-10 text-sm' : 'w-14 h-14 text-lg';
+
+  const hasVideo = stream && stream.getVideoTracks().some(t => t.enabled && t.readyState === 'live');
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !stream) return;
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
+  }, [stream]);
 
   return (
     <div
@@ -38,8 +51,21 @@ const VideoTile = memo(function VideoTile({ participant, isActive, isPinned, onP
       role="region"
       aria-label={`${participant.name}'s video`}
     >
-      {/* Video / Avatar fallback */}
-      {participant.isCameraOff ? (
+      {/* Actual video element (always rendered if stream exists) */}
+      {stream && (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isMirrored} // local video is muted to prevent echo
+          className={`absolute inset-0 w-full h-full object-cover ${isMirrored ? 'scale-x-[-1]' : ''} ${
+            (!hasVideo || participant.isCameraOff) ? 'hidden' : ''
+          }`}
+        />
+      )}
+
+      {/* Avatar fallback when no video */}
+      {(!hasVideo || participant.isCameraOff || !stream) && (
         <div className="w-full h-full flex items-center justify-center bg-meet-tile-bg">
           <div className={`rounded-full bg-primary/20 flex items-center justify-center ${avatarSize}`}>
             <span className="font-semibold text-primary">
@@ -47,20 +73,20 @@ const VideoTile = memo(function VideoTile({ participant, isActive, isPinned, onP
             </span>
           </div>
         </div>
-      ) : (
-        <div className="w-full h-full bg-meet-tile-bg flex items-center justify-center">
-          <div className={`rounded-full bg-primary/30 flex items-center justify-center ${avatarSize}`}>
-            <span className="font-semibold text-primary">
-              {participant.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-            </span>
-          </div>
+      )}
+
+      {/* Screen sharing indicator */}
+      {participant.isScreenSharing && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/90 text-primary-foreground text-xs font-medium">
+          <Monitor className="w-3.5 h-3.5" />
+          Presenting
         </div>
       )}
 
       {/* Top indicators */}
       <div className="absolute top-2 right-2 flex items-center gap-1.5">
         {participant.isHandRaised && (
-          <div className="w-7 h-7 rounded-full bg-meet-warning/20 flex items-center justify-center">
+          <div className="w-7 h-7 rounded-full bg-meet-warning/20 flex items-center justify-center animate-bounce">
             <Hand className="w-4 h-4 text-meet-warning" />
           </div>
         )}
