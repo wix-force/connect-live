@@ -16,10 +16,6 @@ export const config = {
     refreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
   },
 
-  redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379',
-  },
-
   client: {
     url: process.env.CLIENT_URL || 'http://localhost:5173',
   },
